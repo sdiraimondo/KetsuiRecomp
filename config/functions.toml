@@ -1,0 +1,30 @@
+# Function boundaries missing from automatic discovery, found by disassembling
+# the decrypted .text section of default.xex (Title ID 465607D1, SHA-1 2e7a1006...).
+
+# Two-instruction this-adjust thunk: addi r3,r3,8 ; b 0x82BE9D38.
+# Branched to by the tail jump at 0x82BEB474.
+[functions."0x82BEB468"]
+size = 0x8
+name = "thunk_82BEB468"
+
+# Five-instruction null check: cmplwi / bne 0x82C6B134 / lis / ori / blr.
+# Tail-jumped to from 0x829E0DD8.
+[functions."0x82C6B120"]
+size = 0x14
+name = "stub_82C6B120"
+
+# Leaf function after an unconditional branch (b 0x829F1B6C at 0x829F1DEC).
+# Ends with blr at 0x829F1E18, padding at 0x829F1E1C. Reached only through an
+# indirect call, so discovery missed it. Runtime fatal: "Call to invalid or
+# unregistered function at guest address 0x829F1DF0".
+[functions."0x829F1DF0"]
+size = 0x2C
+name = "fn_829F1DF0"
+
+# Leaf function after an unconditional branch (b 0x82B1D134 at 0x82B1D144).
+# Its last blr is at 0x82B1D1CC; the next function (mflr r12 prolog) starts at
+# 0x82B1D1D0. Reached only through an indirect call. Runtime fatal:
+# "Call to invalid or unregistered function at guest address 0x82B1D148".
+[functions."0x82B1D148"]
+size = 0x88
+name = "fn_82B1D148"

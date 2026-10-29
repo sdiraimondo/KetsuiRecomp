@@ -1,0 +1,25 @@
+# Game files: never commit them. Bring your own copy.
+game_files
+*.xex
+Data/
+nxeart
+$SystemUpdate/
+
+# Generated code (produced by rexglue codegen from your copy of the game)
+generated/
+
+# Build and SDK checkout
+build/
+out/
+rexglue-sdk/
+
+# Local logs and captures
+logs/
+*.log
+*.xwd
+
+# Local-only files
+/play.sh
+/STATE.md
+.cache/
+*.swp
