@@ -247,3 +247,97 @@ index 813bb1c..1618a4b 100644
    if (!assignment_) {
      return X_ERROR_DEVICE_NOT_CONNECTED;
    }
+diff --git a/src/kernel/xam/xam_content.cpp b/src/kernel/xam/xam_content.cpp
+index 1fb1e16..b84aa9a 100644
+--- a/src/kernel/xam/xam_content.cpp
++++ b/src/kernel/xam/xam_content.cpp
+@@ -9,6 +9,11 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <cstring>
++#include <string>
++
++#include <fmt/format.h>
++
+ #include <rex/cvar.h>
+ #include <rex/kernel/xam/private.h>
+ #include <rex/logging.h>
+@@ -46,14 +51,28 @@ u32 XamContentGetLicenseMask_entry(mapped_u32 mask_ptr, mapped_void overlapped_p
+ 
+ u32 XamContentResolve_entry(u32 user_index, mapped_void content_data_ptr, mapped_void buffer_ptr,
+                             u32 buffer_size, u32 unk1, u32 unk2, u32 unk3) {
+-  auto content_data = content_data_ptr.as<XCONTENT_DATA*>();
+-
+   // Result of buffer_ptr is sent to RtlInitAnsiString.
+   // buffer_size is usually 260 (max path).
+   // Games expect zero if resolve was successful.
+-  assert_always();
+-  REXKRNL_WARN("XamContentResolve unimplemented!");
+-  return X_ERROR_NOT_FOUND;
++  // Resolves an existing saved game package to a path the game can open: the
++  // package is mounted under a private root, and the path names its file.
++  constexpr char kResolveRoot[] = "ketsuiresolve";
++  XCONTENT_AGGREGATE_DATA content_data = *content_data_ptr.as<XCONTENT_DATA*>();
++  uint64_t xuid = REX_KERNEL_STATE()->user_profile()->xuid();
++  auto content_manager = REX_KERNEL_STATE()->content_manager();
++  if (!content_manager->ContentExists(xuid, content_data)) {
++    return X_ERROR_NOT_FOUND;
++  }
++  uint32_t license = 0;
++  auto result = content_manager->OpenContent(kResolveRoot, xuid, content_data, license);
++  if (result != X_ERROR_SUCCESS && result != X_ERROR_ALREADY_EXISTS) {
++    return X_ERROR_NOT_FOUND;
++  }
++  std::string path = fmt::format("{}:\\{}", kResolveRoot, std::string(content_data.file_name()));
++  if (buffer_size > path.size()) {
++    std::memcpy(buffer_ptr.as<char*>(), path.c_str(), path.size() + 1);
++  }
++  return X_ERROR_SUCCESS;
+ }
+ 
+ // https://github.com/MrColdbird/gameservice/blob/master/ContentManager.cpp
+diff --git a/src/system/xam/content_manager.cpp b/src/system/xam/content_manager.cpp
+index bd6c797..25903a3 100644
+--- a/src/system/xam/content_manager.cpp
++++ b/src/system/xam/content_manager.cpp
+@@ -255,6 +255,23 @@ X_RESULT ContentManager::ReadContentHeaderFile(const std::string_view file_name,
+   return X_ERROR_SUCCESS;
+ }
+ 
++// A saved game is a fixed-size container on the console, and the game checks its
++// size when it loads the data (0xF000 bytes). Create and extend it to that size.
++constexpr uintmax_t kSavedGameFileSize = 0xF000;
++
++void SizeSavedGameFile(const std::filesystem::path& package_file, const XCONTENT_AGGREGATE_DATA& data) {
++  if (data.content_type != XContentType::kSavedGame) {
++    return;
++  }
++  std::error_code ec;
++  if (!std::filesystem::exists(package_file, ec)) {
++    rex::filesystem::CreateEmptyFile(package_file);
++  }
++  if (std::filesystem::file_size(package_file, ec) != kSavedGameFileSize) {
++    std::filesystem::resize_file(package_file, kSavedGameFileSize, ec);
++  }
++}
++
+ X_RESULT ContentManager::CreateContent(const std::string_view root_name, uint64_t xuid,
+                                        const XCONTENT_AGGREGATE_DATA& data) {
+   {
+@@ -271,6 +288,7 @@ X_RESULT ContentManager::CreateContent(const std::string_view root_name, uint64_
+   if (!std::filesystem::create_directories(package_path)) {
+     return X_ERROR_ACCESS_DENIED;
+   }
++  SizeSavedGameFile(package_path / rex::to_path(data.file_name()), data);
+   auto package = ResolvePackage(root_name, xuid, data);
+   assert_not_null(package);
+ 
+@@ -298,6 +316,7 @@ X_RESULT ContentManager::OpenContent(const std::string_view root_name, uint64_t
+   if (!std::filesystem::exists(package_path)) {
+     return X_ERROR_FILE_NOT_FOUND;
+   }
++  SizeSavedGameFile(package_path / rex::to_path(data.file_name()), data);
+   auto package = ResolvePackage(root_name, xuid, data);
+   assert_not_null(package);
+   package->LoadPackageLicenseMask(ResolvePackageHeaderPath(

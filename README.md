@@ -8,7 +8,7 @@ v0.10.0. Rendering goes through Vulkan, input through SDL3.
 game files (the folder with `default.xex`, `Data/`, `nxeart` and `$SystemUpdate/`).
 Nothing from the game is committed, copied or downloaded by these scripts.
 
-Status: version 1.1. Tested on Fedora Atomic (Bazzite) with an AMD GPU (RADV), X11 via
+Status: version 1.1.1. Tested on Fedora Atomic (Bazzite) with an AMD GPU (RADV), X11 via
 XWayland, and a PS4 controller seen by SDL.
 
 ## What you need
@@ -92,6 +92,19 @@ tools/install_desktop.sh
 It writes `~/.local/share/applications/ketsui.desktop` and an icon under
 `~/.local/share/icons/`.
 
+## Exit
+
+On the main menu, press **Escape** (keyboard) or **B** (controller) to open an
+"Exit game?" confirmation. **No** is selected by default: Left/Right (or the D-pad) change
+the choice, Enter/Space (or **A**) confirms, Escape (or **B**) cancels.
+
+## Saves and settings
+
+The in-game CONFIG settings are stored in the game's save data (`Save.dat`, in the user
+data folder). The game expects this file to be exactly 0xF000 bytes: the port creates it
+at that size, and extends an existing smaller file to it when it is opened (the data
+already in it is kept).
+
 ## Settings
 
 Press **F4** in the game to open the settings overlay, and **Save to config** to store
@@ -120,13 +133,16 @@ them. Most settings are the SDK's cvars (`--help` is not handled by the game; se
 
 - `config/functions.toml`, `config/functions_scan.toml`: guest function boundaries that
   the automatic discovery missed. Addresses only, found by disassembling your copy.
-- `sdk_patches.diff`: the only changes made to the SDK (8 files). Fixes:
+- `sdk_patches.diff`: the only changes made to the SDK (10 files). Fixes:
   - a lock around the input device table (a double free when several threads poll the
     controller), with the matching header change;
   - an unlink of the shared-memory arena right after creation (a leftover multi-gigabyte
     tmpfs file after an abort);
   - the SDK version lookup reads the project's own version, not a parent git repository's
-    tag (`CMakeLists.txt`).
+    tag (`CMakeLists.txt`);
+  - `XamContentResolve` resolves an existing save package to its file, so the game can open
+    its save data;
+  - saved-game files are sized to 0xF000 bytes on creation and on open.
 
   Measurement only, inactive by default:
   - per-frame CSV: the frame period is recorded at each flip, and the CSV is flushed every
