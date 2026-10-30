@@ -25,7 +25,7 @@ with keyboard and controller support.
 | 2 | Stable play: no crash in a 10-minute session | ✅ Done (validated by a user session) |
 | 3 | Input record and replay, for repeatable tests | ⏳ Not started |
 | 4 | 60 fps: 99.9th percentile frame time ≤ 17 ms, no frame above 20 ms in 10 minutes | ❌ Not met (see below) |
-| 5 | Desktop integration: first-run folder picker, saved configuration, launcher | ✅ Done, except the vertical (TATE) display mode |
+| 5 | Desktop integration: first-run folder picker, saved configuration, launcher | ✅ Done |
 | 6 | Release: no game file in the repository, reproducible build | ✅ Repository clean; release archives contain no game file |
 
 The release archives contain the recompiled game code (translated from the game's PowerPC
@@ -48,7 +48,6 @@ code) but not the game's data. See [Legal](#legal).
   is on time. The delay sits in the game's own code and is not fixed.
 - Native Wayland video is disabled (no `egl.pc` in the build). The game runs through X11
   or XWayland.
-- No TATE (vertical) display mode. Rotate the display in your desktop settings if needed.
 - Some guest code is still stubbed (for example `XamContentResolve` beyond the save path).
 
 ## Controls
