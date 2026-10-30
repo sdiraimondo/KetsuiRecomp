@@ -1,3 +1,17 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 9b3cdf5..5aaf4ba 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -188,7 +188,8 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/rex_pch.cmake)
+ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/rex_version.cmake)
+ rex_resolve_version(REXGLUE_FULL_VERSION
+     FLOOR_MAJOR ${PROJECT_VERSION_MAJOR}
+-    FLOOR_MINOR ${PROJECT_VERSION_MINOR})
++    FLOOR_MINOR ${PROJECT_VERSION_MINOR}
++    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+ 
+ # Strip the -id trailer (if any) for the numeric-only version.
+ string(REGEX REPLACE "-.*$" "" REXGLUE_NUMERIC_VERSION "${REXGLUE_FULL_VERSION}")
 diff --git a/include/rex/input/input_system.h b/include/rex/input/input_system.h
 index 1cb3faa..d987aab 100644
 --- a/include/rex/input/input_system.h
@@ -22,6 +36,46 @@ index 1cb3faa..d987aab 100644
    // Ordered by ordinal. Ordinals are never recycled, so unplugging pad one
    // does not renumber pad two.
    std::vector<DeviceInfo> devices_;
+diff --git a/include/rex/perf/counter.h b/include/rex/perf/counter.h
+index b3947e0..6fe5512 100644
+--- a/include/rex/perf/counter.h
++++ b/include/rex/perf/counter.h
+@@ -10,6 +10,7 @@
+  */
+ #pragma once
+ 
++#include <chrono>
+ #include <cstdint>
+ #include <string>
+ 
+@@ -38,6 +39,11 @@ enum class CounterId : uint16_t {
+   kFunctionsDispatched,
+   kInterruptDispatches,
+ 
++  // VSync (measurement)
++  kVsyncVblanks,
++  kVsyncCatchupVblanks,
++  kVsyncLateUs,
++
+   // Threading
+   kActiveThreads,
+   kApcQueueDepth,
+@@ -107,6 +113,15 @@ class Profiler {
+     }
+ #endif
+ #ifdef REXGLUE_ENABLE_PERF_COUNTERS
++    // Frame period: time since the previous Flip. Set before the reset so the
++    // value reaches this frame's snapshot (and the CSV).
++    static std::chrono::steady_clock::time_point last_flip{};
++    const auto now = std::chrono::steady_clock::now();
++    if (last_flip.time_since_epoch().count() != 0) {
++      SetCounter(CounterId::kFrameTimeUs,
++                 std::chrono::duration_cast<std::chrono::microseconds>(now - last_flip).count());
++    }
++    last_flip = now;
+     ResetFrameCounters();
+     WriteCsvFrame();
+ #endif
 diff --git a/src/core/memory_posix.cpp b/src/core/memory_posix.cpp
 index b52bf39..7f7e6c9 100644
 --- a/src/core/memory_posix.cpp
@@ -36,6 +90,119 @@ index b52bf39..7f7e6c9 100644
    return static_cast<FileMappingHandle>(ret);
  #endif
  }
+diff --git a/src/core/perf/counter.cpp b/src/core/perf/counter.cpp
+index 536009e..be9883b 100644
+--- a/src/core/perf/counter.cpp
++++ b/src/core/perf/counter.cpp
+@@ -42,6 +42,9 @@ constexpr const char* kCounterNames[] = {
+     "buffer_queue_depth",
+     "functions_dispatched",
+     "interrupt_dispatches",
++    "vsync_vblanks",
++    "vsync_catchup_vblanks",
++    "vsync_late_us",
+     "active_threads",
+     "apc_queue_depth",
+     "critical_region_contentions",
+@@ -65,6 +68,9 @@ constexpr bool kIsGauge[] = {
+     false,  // kBufferQueueDepth  (set each frame)
+     false,  // kFunctionsDispatched
+     false,  // kInterruptDispatches
++    false,  // kVsyncVblanks
++    false,  // kVsyncCatchupVblanks
++    false,  // kVsyncLateUs
+     true,   // kActiveThreads     (inc/dec over lifetime)
+     false,  // kApcQueueDepth
+     true,   // kCriticalRegionContentions (running total)
+@@ -165,9 +171,10 @@ void WriteCsvFrame() {
+   }
+   std::fputc('\n', g_csv_file);
+ 
+-  if (++g_csv_frame_count % 60 == 0) {
+-    std::fflush(g_csv_file);
+-  }
++  // Flush every frame: the process exits with a hard exit, which would drop
++  // the buffered rows of a measurement run.
++  ++g_csv_frame_count;
++  std::fflush(g_csv_file);
+ }
+ 
+ void FlushCsv() {
+diff --git a/src/graphics/graphics_system.cpp b/src/graphics/graphics_system.cpp
+index 8f2fcb0..533b8a7 100644
+--- a/src/graphics/graphics_system.cpp
++++ b/src/graphics/graphics_system.cpp
+@@ -24,6 +24,7 @@
+ #include <rex/graphics/flags.h>
+ #include <rex/kernel/xboxkrnl/video.h>
+ #include <rex/logging.h>
++#include <rex/perf/counter.h>
+ #include <rex/stream.h>
+ #include <rex/system/kernel_state.h>
+ #include <rex/system/xthread.h>
+@@ -162,9 +163,19 @@ X_STATUS GraphicsSystem::SetupGuestGpu(runtime::FunctionDispatcher* function_dis
+           uint64_t current_time = chrono::Clock::QueryGuestTickCount();
+           uint64_t interval_ticks =
+               REXCVAR_GET(vsync) ? vsync_interval_ticks : no_vsync_interval_ticks;
++          if (current_time - last_frame_time >= interval_ticks) {
++            PERF_counter_add(kVsyncLateUs, int64_t((current_time - last_frame_time - interval_ticks) *
++                                                   1000000 / guest_tick_frequency));
++          }
++          uint64_t vblanks = 0;
+           while (current_time - last_frame_time >= interval_ticks) {
+             MarkVblank();
+             last_frame_time += interval_ticks;
++            ++vblanks;
++          }
++          PERF_counter_add(kVsyncVblanks, int64_t(vblanks));
++          if (vblanks > 1) {
++            PERF_counter_add(kVsyncCatchupVblanks, int64_t(vblanks - 1));
+           }
+           rex::thread::Sleep(std::chrono::milliseconds(1));
+         }
+diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
+index 001f36b..c3d8d15 100644
+--- a/src/graphics/vulkan/command_processor.cpp
++++ b/src/graphics/vulkan/command_processor.cpp
+@@ -55,6 +55,9 @@ REXCVAR_DEFINE_BOOL(vulkan_readback_memexport, false, "GPU/Vulkan",
+                     "Read data written by memory export in shaders on the CPU")
+     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+ 
++REXCVAR_DEFINE_BOOL(vulkan_measure_skip_gpu, false, "GPU/Vulkan",
++                    "Measurement only: skip shader translation, draws and copies. The guest "
++                    "command protocol still runs, so the cost of the GPU work can be isolated.");
+ REXCVAR_DEFINE_BOOL(vulkan_async_skip_incomplete_frames, true, "GPU/Vulkan",
+                     "When async shader compilation is enabled, skip presenting frames that "
+                     "used placeholder pipelines to avoid visible flashing")
+@@ -3584,12 +3587,18 @@ void VulkanCommandProcessor::OnPrimaryBufferEnd() {
+ 
+ Shader* VulkanCommandProcessor::LoadShader(xenos::ShaderType shader_type, uint32_t guest_address,
+                                            const uint32_t* host_address, uint32_t dword_count) {
++  if (REXCVAR_GET(vulkan_measure_skip_gpu)) {
++    return nullptr;
++  }
+   return pipeline_cache_->LoadShader(shader_type, host_address, dword_count);
+ }
+ 
+ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t index_count,
+                                        IndexBufferInfo* index_buffer_info,
+                                        bool major_mode_explicit) {
++  if (REXCVAR_GET(vulkan_measure_skip_gpu)) {
++    return true;
++  }
+ #if XE_GPU_FINE_GRAINED_DRAW_SCOPES
+   SCOPE_profile_cpu_f("gpu");
+ #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
+@@ -4382,6 +4391,9 @@ bool VulkanCommandProcessor::IssueDraw_MemexportReadbackFastPath(uint32_t total_
+ }
+ 
+ bool VulkanCommandProcessor::IssueCopy() {
++  if (REXCVAR_GET(vulkan_measure_skip_gpu)) {
++    return true;
++  }
+ #if XE_GPU_FINE_GRAINED_DRAW_SCOPES
+   SCOPE_profile_cpu_f("gpu");
+ #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
 diff --git a/src/input/input_system.cpp b/src/input/input_system.cpp
 index 813bb1c..1618a4b 100644
 --- a/src/input/input_system.cpp

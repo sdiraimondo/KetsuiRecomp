@@ -23,3 +23,6 @@ logs/
 /STATE.md
 .cache/
 *.swp
+
+# Abandoned experiments (not published)
+wip/

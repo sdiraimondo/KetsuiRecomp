@@ -8,7 +8,7 @@ v0.10.0. Rendering goes through Vulkan, input through SDL3.
 game files (the folder with `default.xex`, `Data/`, `nxeart` and `$SystemUpdate/`).
 Nothing from the game is committed, copied or downloaded by these scripts.
 
-Status: version 1.0. Tested on Fedora Atomic (Bazzite) with an AMD GPU (RADV), X11 via
+Status: version 1.1. Tested on Fedora Atomic (Bazzite) with an AMD GPU (RADV), X11 via
 XWayland, and a PS4 controller seen by SDL.
 
 ## What you need
@@ -75,6 +75,9 @@ It is not committed.
 build/ketsui/ketsui
 ```
 
+The Xenos renderer (`librexgpu-xenos.so`) is loaded by default. `--gpu_plugin xenos` is not
+needed. Without a renderer the game runs with no picture at all.
+
 On the first run, if no game folder is known, a message box asks you to choose it, then a
 folder picker opens. Choose the folder that contains `default.xex`. The choice is saved in
 `~/.config/ketsui/ketsui.toml` (`$XDG_CONFIG_HOME` is honoured). To pass a folder
@@ -108,15 +111,29 @@ them. Most settings are the SDK's cvars (`--help` is not handled by the game; se
 - A few guest functions are larger than the code generator's 1 MiB file target
   (warning only).
 - Some guest code is still stubbed (for example `XamContentResolve`).
+- **60 fps is not guaranteed.** On the test machine, most frames take about 16.7 ms, but
+  between 5 % and 20 % of frames (depending on the run) take about 33 ms, which is two
+  vblank periods. The measurements in `PERF.md` show that the GPU emulation is not the cause
+  and that the vblank delivery is on time. The cause is in the guest code and is not fixed.
 
 ## Fixes and where they live
 
 - `config/functions.toml`, `config/functions_scan.toml`: guest function boundaries that
   the automatic discovery missed. Addresses only, found by disassembling your copy.
-- `sdk_patches.diff`: the only changes made to the SDK. Three small fixes:
-  a lock around the input device table (a double free when several threads poll the
-  controller), an unlink of the shared-memory arena right after creation (a leftover
-  multi-gigabyte tmpfs file after an abort), and the matching header change.
+- `sdk_patches.diff`: the only changes made to the SDK (8 files). Fixes:
+  - a lock around the input device table (a double free when several threads poll the
+    controller), with the matching header change;
+  - an unlink of the shared-memory arena right after creation (a leftover multi-gigabyte
+    tmpfs file after an abort);
+  - the SDK version lookup reads the project's own version, not a parent git repository's
+    tag (`CMakeLists.txt`).
+
+  Measurement only, inactive by default:
+  - per-frame CSV: the frame period is recorded at each flip, and the CSV is flushed every
+    frame (`--perf_log_csv`); vsync counters (`vsync_vblanks`, `vsync_catchup_vblanks`,
+    `vsync_late_us`);
+  - `--vulkan_measure_skip_gpu`: skips shader translation, draws and copies. It keeps the
+    guest command protocol running, to separate the cost of the GPU work.
 
 ## License
 

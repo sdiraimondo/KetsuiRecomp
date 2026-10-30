@@ -13,7 +13,10 @@
 
 #include <rex/cvar.h>
 #include <rex/filesystem.h>
+#include <rex/perf/counter.h>
 #include <rex/runtime.h>
+
+REXCVAR_DECLARE(std::string, perf_log_csv);
 
 namespace {
 
@@ -68,6 +71,19 @@ void ShowInfo(const char* message, SDL_MessageBoxFlags flags) {
 
 void KetsuiApp::OnConfigurePaths(rex::PathConfig& paths) {
   paths.config_path = UserConfigPath();
+}
+
+void KetsuiApp::OnPreSetup(rex::RuntimeConfig& config) {
+  // Without a GPU plugin the game runs with no graphics at all: default to the
+  // Xenos emulation, unless --gpu_plugin names another one.
+  if (config.gpu_plugin.empty()) {
+    config.gpu_plugin = "xenos";
+  }
+}
+
+void KetsuiApp::OnPostSetup() {
+  // The SDK defines --perf_log_csv but never opens the file: nothing calls this.
+  rex::perf::SetCsvLogPath(REXCVAR_GET(perf_log_csv));
 }
 
 std::optional<rex::PathConfig> KetsuiApp::OnFinalizePaths(

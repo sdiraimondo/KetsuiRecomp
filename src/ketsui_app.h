@@ -26,6 +26,8 @@ class KetsuiApp : public rex::ReXApp {
   }
 
   void OnConfigurePaths(rex::PathConfig& paths) override;
+  void OnPreSetup(rex::RuntimeConfig& config) override;
+  void OnPostSetup() override;
   std::optional<rex::PathConfig> OnFinalizePaths(
       const rex::PathConfig& defaults,
       std::function<void(rex::PathConfig)> resume) override;
